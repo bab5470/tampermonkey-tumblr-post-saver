@@ -20,7 +20,7 @@
 // @run-at document-end
 //
 // @require https://openuserjs.org/src/libs/sizzle/GM_config.js
-// @require  https://gist.github.com/raw/2625891/waitForKeyElements.js
+// @require https://greasyfork.org/scripts/2199-waitforkeyelements/code/waitForKeyElements.js?version=6349
 // @require http://code.jquery.com/jquery-latest.js
 //
 // ==/UserScript==
