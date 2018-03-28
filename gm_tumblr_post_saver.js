@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tumblr Post Saver
-// @namespace    http://github.com/bab5470/tampermonkey-tumblr-post-saver
-// @version      0.1
+// @namespace    https://github.com/bab5470/tampermonkey-tumblr-post-saver
+// @version      0.2
 // @description  Save tumblr reblogs and drafts on a timer or manually. Prompts you to save new posts to draft (so they aren't lost). Restore posts automatically (after a browser crash). Options to import, export, or clear saved post data.
 // @author       Brad Baker
 //
@@ -17,7 +17,7 @@
 // @grant    unsafeWindow
 // @grant    GM_registerMenuCommand
 //
-// @run-at document-idle
+// @run-at document-end
 //
 // @require https://openuserjs.org/src/libs/sizzle/GM_config.js
 // @require  https://gist.github.com/raw/2625891/waitForKeyElements.js
@@ -83,22 +83,21 @@ GM_config.init({
 var fireOnHashChangesToo    = true;
 var pageURLCheckTimer       = setInterval (
     function () {
-        if (   this.lastPathStr  !== location.pathname
-            || this.lastQueryStr !== location.search
-            || (fireOnHashChangesToo && this.lastHashStr !== location.hash)
-           ) {
+        if (this.lastPathStr  !== location.pathname || this.lastQueryStr !== location.search || (fireOnHashChangesToo && this.lastHashStr !== location.hash)) {
             this.lastPathStr  = location.pathname;
             this.lastQueryStr = location.search;
             this.lastHashStr  = location.hash;
 
             Main ();
         }
-    }
-    , 1000
+    }, 1000
 );
 
 function Main () {
     'use strict';
+
+    console.log ('A new page has loaded.');
+
     // Add CSS
     GM_addStyle('#post_saver_button { font-size: 13px;font-weight: 700; padding-top: 5px;padding-bottom: 5px;border-radius: 2px 2px 2px 2px;padding-left: 10px;padding-right: 10px;border-color: #4a9aca;background-color: #4a9aca;color: hsla(0,0%,100%,.9);float:left;}');
     GM_addStyle('#white_div {font-size: 13px;font-weight: 700;padding-top: 5px;padding-bottom: 5px;padding-left: 10px;padding-right: 10px;background-color: #ffffff;float:left;}');
@@ -108,13 +107,21 @@ function Main () {
         GM_config.open();
     });
 
+    if ((GM_config.get('time_between_saves'))) {
+        console.log('Time between saves: ' + GM_config.get('time_between_saves'));
+    }
+
+    if ((GM_config.get('days_to_keep'))) {
+        console.log('Days to keep: ' + GM_config.get('days_to_keep'));
+    }
+
     // Get the current date stamp and the datestamp that the purge was last run.
     var current_datestamp = build_current_datestamp();
     var last_time_purge_ran_datestamp = GM_getValue("last_ran_purge_datestamp");
 
     // If the last ran purage datestamp isn't set this must be the first run.
     // Set it.
-    if (last_time_purge_ran_datestamp == null) {
+    if (last_time_purge_ran_datestamp === null) {
         // Write the latest run to the database
         GM_setValue("last_ran_purge_datestamp",current_datestamp);
     }
@@ -125,10 +132,16 @@ function Main () {
     }
 
     if(location.pathname.match(/reblog/)) {
+        console.log("reblog");
         reblog();
     } else if (location.pathname.match(/edit/)) {
+        console.log("edit");
         edit();
+    } else if (location.pathname.match(/drafts/)) {
+        console.log("drafts");
+        // Do nothing
     } else {
+        console.log("couldn't find reblog, edit or drafts so polling visibility");
         pollVisibility();
     }
 }
@@ -136,19 +149,34 @@ function Main () {
 function pollVisibility() {
     // The post form is open (it could be a reblog or a new post. We'll check that below.
     if( ($('.post-forms-glass').is(':visible')) && (($('.reblog_name').length) === 0)) {
+        console.log("new post");
         newpost();
     } else {
+        console.log("poll visibility again");
+
+        if(location.pathname.match(/reblog/)) {
+            console.log("reblog");
+            reblog();
+        } else if (location.pathname.match(/edit/)) {
+            console.log("edit");
+            edit();
+        } else if (location.pathname.match(/drafts/)) {
+            console.log("drafts");
+            // Do nothing
+        }
+
         setTimeout(pollVisibility, 5000);
     }
 }
 
 function newpost () {
 
-        // Every "time_between_saves" (see preferences)
-        setInterval(function() {
+    // Every "time_between_saves" (see preferences)
+    //setInterval(function() {
 
+        if (!location.pathname.match(/drafts/)) {
             // Keep prompting the user to save the post as otherwise it may be lost during a browser crash/OS reboot etc.
-            if (confirm("It appears you're starting a new post. Post saver won't work until you save a draft. Would you like to do so now?")) {
+            if (confirm("Warning: It appears you're starting a new post. Post saver can't save new posts until you save an initial draft. Would you like to do so now? (You won't be prompted again)")) {
 
                 // Click the arrow drop down next to the post button
                 document.getElementsByClassName('dropdown-area icon_arrow_carrot_down')[0].click();
@@ -162,15 +190,16 @@ function newpost () {
                 var save_button = $('.post-form--save-button [data-js-clickablesave]');
                 save_button.click();
             }
-        }, GM_config.get('time_between_saves'));
+        }
+    //}, GM_config.get('time_between_saves'));
 }
 
 function reblog () {
 
-    // alert ("reblog");
-
     // Get the request ID from the URL
     request = get_request_id();
+
+    console.log(request);
 
     // Get all the saved posts
     var saved_posts = GM_listValues();
@@ -189,6 +218,8 @@ function reblog () {
         // If there's a match then set the post content to the key data
         if (key.match(regex)) {
 
+            console.log("Match found for " + regex);
+
             // Store the current key in a datestamp variable for use below
             datestamp = key;
 
@@ -201,7 +232,8 @@ function reblog () {
             } else {
                 setTimeout(reblog, 1000);
             }
-
+        } else {
+            console.log("Match NOT found for " + regex);
         }
     }
 
@@ -210,18 +242,38 @@ function reblog () {
 
     // Every "time_between_saves", save the post to the database
     setInterval(function() {
+        var key;
 
         // If the datestamp is null (i.e. we've never seen this post before) then create a new key
         // otherwise reuse the existing key
-        if(datestamp == null) {
-            var key = build_current_datestamp() + "_" + get_request_id();
+        if(datestamp) {
+            key = datestamp;
         } else {
-            var key = datestamp;
+            key = build_current_datestamp() + "_" + get_request_id();
         }
         var postcontent = document.getElementsByClassName('editor editor-richtext')[0];
-        if(postcontent){
+
+        // If the post content is <p><br></p> then the post field is empty. Don't save as
+        // there's no point in saving an empty post and also there can be a race condition
+        // where the post hasn't been restored and thus is empty and the automatic save kicks in.
+        // If that happens the saved post can be wipped out with <p><br></p>
+        if(postcontent.innerHTML === "<p><br></p>"){
+            console.log("Post not saved as post content is empty: " + postcontent.innerHTML);
+        } else if (postcontent.innerHTML === GM_getValue(key)) {
+            // Don't do anything as the post is already up to date.
+            // console.log("Post already up to date: " + key);
+        } else {
+
+            // console.log("Post saved as: " + key);
+            //console.log("Post Content: " +  postcontent.innerHTML);
+
             // Save the post
             GM_setValue(key,postcontent.innerHTML);
+
+            // Check that the post actually saved!
+            if (GM_getValue(key) !==  postcontent.innerHTML) {
+                alert("Post not saved! Try again");
+            }
         }
     }, GM_config.get('time_between_saves'));
 }
@@ -263,13 +315,12 @@ function edit () {
             var current_post_content = document.getElementsByClassName('editor editor-richtext')[0].innerHTML;
 
             // If the two don't match - houston we have a problem
-            if (saved_post_content != current_post_content){
+            // if (saved_post_content != current_post_content){
 
-                // Ask the user what we want to do. Is tumblr right or is post_saver right?
-                if (confirm('I found a draft different than the one here. Do you want to restore it?')) {
-                    document.getElementsByClassName('editor editor-richtext')[0].innerHTML = saved_post_content;
-                }
-            }
+            // Ask the user what we want to do. Is tumblr right or is post_saver right?
+            // if (confirm('I found a draft different than the one here. Do you want to restore it?')) {
+            document.getElementsByClassName('editor editor-richtext')[0].innerHTML = saved_post_content;
+            // }
         }
     }
 
@@ -277,7 +328,7 @@ function edit () {
 
     // If the matched_key is null (i.e. we've never seen this post before) then create a new key
     // otherwise reuse the existing key
-    if(matched_key == null) {
+    if(matched_key === null) {
         key = build_current_datestamp() + "_" + get_request_id();
     } else {
         key = matched_key;
@@ -288,6 +339,11 @@ function edit () {
     if(postcontent){
         // Save the post
         GM_setValue(key,postcontent.innerHTML);
+
+        // Check that the post actually saved!
+        if (GM_getValue(key) !==  postcontent.innerHTML) {
+            alert("Post not saved! Try again");
+        }
     }
 
     // Insert save button
@@ -297,11 +353,18 @@ function edit () {
     setInterval(function() {
         var postcontent = document.getElementsByClassName('editor editor-richtext')[0];
         if(postcontent){
-            // Save the post
-            GM_setValue(key,postcontent.innerHTML);
+            // First check if the post is already saved (there's no sense in repeatedly saving something thats already in the database)
+            if (GM_getValue(key) !==  postcontent.innerHTML) {
+                // Save the post
+                GM_setValue(key,postcontent.innerHTML);
+
+                // Check again that it actually saved. If it didn't alert the user
+                if (GM_getValue(key) !==  postcontent.innerHTML) {
+                    alert("Auto save failed. You may want to try manual saving.");
+                }
+            }
         }
     }, GM_config.get('time_between_saves'));
-
 }
 
 // Get the tumbler post id (request id) from the URL
@@ -321,10 +384,8 @@ function get_request_id (){
     return request;
 }
 
-function insert_save_button (datestamp) {
 
-    // Find the create post button
-    var save_button = document.getElementsByClassName('button-area create_post_button')[0];
+function insert_save_button (datestamp) {
 
     // Create a new button
     var save_draft_button = document.createElement('button');
@@ -339,7 +400,7 @@ function insert_save_button (datestamp) {
 
         // If the datestamp is null (i.e. we've never seen this post before) then create a new key
         // otherwise reuse the existing key
-        if(datestamp == null) {
+        if(datestamp === null) {
             key = build_current_datestamp() + "_" + get_request_id();
         } else {
             key = datestamp;
@@ -348,22 +409,44 @@ function insert_save_button (datestamp) {
         var postcontent = document.getElementsByClassName('editor editor-richtext')[0];
         GM_setValue(key,postcontent.innerHTML);
 
-        alert("saved!");
+        // Check that the post actually saved!
+        if (GM_getValue(key) !==  postcontent.innerHTML) {
+            alert("Post not saved! Try again");
+        } else {
+            alert("saved!");
+        }
 
         return false;
     };
 
-    // Insert the save_draft button before the save button
-    save_button.parentNode.insertBefore(save_draft_button, save_button);
+    var checkExist = setInterval(function() {
+        // Find the create post button
+        var save_button = document.getElementsByClassName('button-area create_post_button')[0];
+        if (save_button) {
+            console.log("Post button exists.");
 
-    // Create a white div to create space between the post saver and post button
-    var white_div = document.createElement('div');
-    white_div.innerHTML = '&nbsp;&nbsp;';
-    white_div.setAttribute("id", "white_div");
+            // Check of the post saver button already exits so we don't add it multiple times.
+            if (document.getElementById('post_saver_button') === null || document.getElementById('post_saver_button') === undefined) {
 
-    // Insert the white space before the save button
-    save_button.parentNode.insertBefore(white_div, save_button);
+                console.log("Post saver button not found to adding it");
 
+                // Insert the save_draft button before the save button
+                save_button.parentNode.insertBefore(save_draft_button, save_button);
+
+                // Create a white div to create space between the post saver and post button
+                var white_div = document.createElement('div');
+                white_div.innerHTML = '&nbsp;&nbsp;';
+                white_div.setAttribute("id", "white_div");
+
+                // Insert the white space before the save button
+                save_button.parentNode.insertBefore(white_div, save_button);
+            }
+
+            clearInterval(checkExist);
+        } else {
+            console.log("Post button does not exist");
+        }
+    }, 100); // check every 100ms
 }
 
 function clear_data (){
@@ -529,7 +612,7 @@ function prune_old_posts (){
     var saved_posts = GM_listValues();
 
     // Iterate through the saved_posts array
-    for (key in saved_posts) {
+    for (var key in saved_posts) {
 
         // Get the post's current datestamp
         var saved_post_datestamp = key.replace(/_.*/g, '');
